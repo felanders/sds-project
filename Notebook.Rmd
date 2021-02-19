@@ -1,0 +1,15 @@
+---
+title: "Social Data Science Group-Project"
+output: html_notebook
+---
+
+Hier können wir mit *fancy* [markdown]{.ul} nicen **stuff** machen
+
+```{r}
+library(dplyr)
+library(tidygraph)
+library(rtweet)
+library(ggraph)
+```
+
+Hier könnte ihre Werbung sein
