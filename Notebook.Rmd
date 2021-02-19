@@ -14,6 +14,14 @@ library(ggraph)
 
 Hier könnte ihre Werbung sein
 
+
+Mache ein paar leerzeilen ich glaube es sollte keine änderungen in den gleichen zeilen geben dann hakt es nämlich beim mergen, wir werden sehen
+
+```{r}
+ex2 <- function(ex2){
+  return("this is the 2nd example function just returning bullshit")
+  }
+```
 ```{r}
 example <-  function(ex1){
   return("Hi this is example 1")
