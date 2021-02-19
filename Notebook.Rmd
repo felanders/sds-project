@@ -13,3 +13,10 @@ library(ggraph)
 ```
 
 Hier könnte ihre Werbung sein
+
+```{r}
+example <-  function(ex1){
+  return("Hi this is example 1")
+}
+```
+
