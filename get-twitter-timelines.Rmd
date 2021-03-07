@@ -1,0 +1,92 @@
+---
+title: "Get twitter timelines"
+output: html_notebook
+---
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidygraph)
+library(rtweet)
+library(ggraph)
+library(stringr)
+```
+
+Define a function to check for twitter api limits and wait if needed
+
+```{r}
+check_lim <- function(){
+  rate_limit() %>% 
+    select(query, remaining, reset) %>% 
+    filter(query == "application/rate_limit_status" | query == "statuses/user_timeline" ) -> limits
+  
+  limits %>% 
+    filter(query == "application/rate_limit_status") %>% 
+    select(remaining) -> rate_remain
+  
+  limits %>% 
+    filter(query == "application/rate_limit_status") %>% 
+    select(reset) -> rate_reset
+  
+  limits %>% 
+    filter(query == "statuses/user_timeline") %>% 
+    select(remaining) -> tml_remain
+  
+  limits %>% 
+    filter(query == "statuses/user_timeline") %>% 
+    select(reset) -> tml_reset
+  
+  if (rate_remain < 1){
+    print(paste("waiting for: ", toString(as.numeric(toString(rate_reset))*60+1)))
+    Sys.sleep(as.numeric(toString(rate_reset))*60+1)
+  }else if (tml_remain < 16){
+    print(paste("waiting for: ", toString(as.numeric(toString(tml_reset))*60+1)))
+    Sys.sleep(as.numeric(toString(tml_reset))*60+1)
+  }
+  return()
+}
+```
+
+Get the list of twitter users 
+
+```{r}
+deputati <- readRDS("userlist.rds")
+```
+
+Define a function to remove file-endings from file-names
+
+```{r}
+rm_ending <- function(string){
+  return (str_sub(string, 1, -5))
+}
+```
+
+Get all the user_id's that have already been saved in the folder with path "./timelines"
+
+```{r}
+users <- lapply(list.files(path = "./timelines/"), rm_ending)
+```
+
+Create a empty data frame to handle timelines
+
+```{r}
+timeline = data.frame()
+```
+
+Loop over all twitter users in the list and get their timelines
+
+```{r}
+for (i in 1:nrow(deputati)){
+  user <- deputati$user_id[i]
+  # If the timeline was already retrieved skip the user
+  if (user %in% users){}
+  else{
+    users[i] <- user
+    # Check the limits if nothing left wait
+    check_lim()
+    # get the timeline of the user
+    timeline <- get_timeline(user = user, n=3200, check = F)
+    # save the timeline into the "timelines" folder using the user_id as filename
+    saveRDS(timeline, paste("./timelines/", user, ".rds", sep=""))
+  }
+}
+```
+

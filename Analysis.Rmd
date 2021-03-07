@@ -1,0 +1,165 @@
+---
+title: "Analyze data"
+output: html_notebook
+---
+
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidygraph)
+library(rtweet)
+library(ggraph)
+library(stringr)
+```
+
+Combine all files into one dataframe and save it to timelines.rds
+
+```{r}
+files <- list.files(path = "./timelines/")
+for (file in files){
+  df <- rbind(df, readRDS(paste("./timelines/", file, sep = "")))
+}
+saveRDS(df, file = "timelines.rds")
+```
+
+```{r}
+df <- readRDS("timelines.rds")
+```
+
+```{r}
+user_df <- readRDS("userlist.rds")
+ids <- as.data.frame(user_df$user_id)
+names(ids) <- c("user_id")
+df %>% 
+  inner_join(ids, by = c("retweet_user_id" = "user_id")) %>% 
+  filter(user_id != retweet_user_id)-> network
+```
+
+```{r}
+saveRDS(network, "retweet_network.rds")
+```
+
+```{r}
+network %>% 
+  inner_join(user_df) %>%
+  group_by(user_id, screen_name, gruppo) %>% 
+  select(user_id, screen_name, gruppo) %>% 
+  unique() -> vertices
+
+network %>% 
+  select(from = retweet_user_id, to = user_id) %>% 
+  group_by(from, to) %>% 
+  filter(from %in% vertices$user_id & to %in% vertices$user_id) %>% 
+  summarise(weight = n()) -> edges
+```
+
+```{r}
+saveRDS(vertices, "retweet_nw_vert.rds")
+saveRDS(edges, "retweet_nw_edg.rds")
+```
+
+```{r}
+graph <- tbl_graph(vertices, edges, directed = F, node_key = "user_id")
+saveRDS(graph, "retweet_graph.rds")
+```
+
+```{r }
+graph %>% 
+  ggraph("fr")  + geom_edge_link()  + geom_node_point(aes(color=gruppo), size=3) + theme_graph()
+
+graph %>% 
+  activate(nodes) %>% 
+  mutate(ass = graph_assortativity(attr = gruppo)) %>%
+  pull(ass) %>% 
+  head(1) -> assort
+```
+
+
+```{r }
+permassort <- NULL
+for (i in 1:1000){
+  graph %>% 
+  activate(nodes) %>% 
+  mutate(ass = graph_assortativity(attr = sample(gruppo))) %>%
+  pull(ass) %>% 
+  head(1) -> res
+  permassort <- c(permassort, res)
+}
+permassort = data.frame(permassort)
+
+ggplot(permassort, aes(x=permassort)) +
+  geom_histogram() +
+  geom_vline(xintercept = assort, colour = "red")
+```
+
+```{r}
+user_df %>% 
+  filter(gruppo == "ITALIA VIVA") -> user_df_2
+
+user_df %>% 
+  filter(gruppo == "PARTITO DEMOCRATICO") %>% 
+  rbind(user_df_2) -> user_df_2
+
+ids <- as.data.frame(user_df_2$user_id)
+names(ids) <- c("user_id")
+df %>% 
+  inner_join(ids, by = c("retweet_user_id" = "user_id")) %>% 
+  filter(user_id != retweet_user_id, created_at < "2019-09-18 00:00:00" ) -> network_2
+```
+
+```{r}
+saveRDS(network_2, "retweet_network_2.rds")
+```
+
+```{r}
+network_2 %>% 
+  inner_join(user_df_2) %>%
+  group_by(user_id, screen_name, gruppo) %>% 
+  select(user_id, screen_name, gruppo) %>% 
+  unique() -> vertices_2
+
+network_2 %>% 
+  select(from = retweet_user_id, to = user_id) %>% 
+  group_by(from, to) %>% 
+  filter(from %in% vertices_2$user_id & to %in% vertices_2$user_id) %>% 
+  summarise(weight = n()) -> edges_2
+```
+
+```{r}
+saveRDS(vertices_2, "retweet_nw_vert_2.rds")
+saveRDS(edges_2, "retweet_nw_edg_2.rds")
+```
+
+```{r}
+graph_2 <- tbl_graph(vertices_2, edges_2, directed = F, node_key = "user_id")
+saveRDS(graph_2, "retweet_graph_2.rds")
+```
+
+```{r }
+graph_2 %>% 
+  ggraph("fr")  + geom_edge_link()  + geom_node_point(aes(color=gruppo), size=3) + theme_graph()
+
+graph_2 %>% 
+  activate(nodes) %>% 
+  mutate(ass = graph_assortativity(attr = gruppo)) %>%
+  pull(ass) %>% 
+  head(1) -> assort_2
+```
+
+
+```{r }
+permassort_2 <- NULL
+for (i in 1:1000){
+  graph_2 %>% 
+  activate(nodes) %>% 
+  mutate(ass = graph_assortativity(attr = sample(gruppo))) %>%
+  pull(ass) %>% 
+  head(1) -> res
+  permassort_2 <- c(permassort_2, res)
+}
+permassort_2 = data.frame(permassort_2)
+
+ggplot(permassort_2, aes(x=permassort_2)) +
+  geom_histogram() +
+  geom_vline(xintercept = assort_2, colour = "red")
+```
+

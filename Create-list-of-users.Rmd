@@ -1,0 +1,196 @@
+---
+title: "Create list of users"
+output: html_notebook
+---
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(dplyr)
+library(tidygraph)
+library(rtweet)
+library(ggraph)
+library(stringr)
+```
+
+## 1. Get the list from camera dei deputati official twitter account (montecitorio)
+
+```{r}
+deputati <- lists_members("981119394062487552")
+nrow(deputati)
+```
+## 2. Scrape the official site of the camera dei deputati for the names and group / party affiliations
+
+This was done in python using the notebook "Web-scraping.ipynb" 
+(Comment by Andreas: As part of another course this semester I had to scrape a website, therefore I used the opportunity to collect data about Italian politicians.)
+
+```{r}
+# read the file
+list_deputati <- read.csv("deputati.csv", stringsAsFactors = F)
+nrow(list_deputati)
+```
+
+## 3. Match the names of the two lists
+
+Try to match twitter with official names
+
+```{r}
+#create an empty collumn for official names
+#deputati
+# loop over the list of official names
+for (dep_name in list_deputati$name){
+  # Get the surname
+  patt = str_split(dep_name, " ")[[1]]
+  # take care of special surnames
+  if (patt[1] == "de" || patt[1] == "di" || patt[1] == "lo"  || patt[1] == "la"){
+    patt = paste(patt[1], patt[2], sep = " ")
+  } else {
+    patt = toString(patt[1])
+  }
+  deputati$off_name[str_detect(deputati$name, regex(patt, ignore_case = T ) )] <- toString(list_deputati$name[str_detect(list_deputati$name, regex(patt, ignore_case = T ) )][1])
+}
+```
+
+Perform manual cleaning
+
+```{r}
+deputati %>% 
+  select(name, off_name) -> comparison_table
+```
+
+Remove official name for false matches
+
+```{r}
+false_matches<- c("Anna Bilotti", "Marco Rizzone", "Maria Marzana", "Andrea Giarrizzo", 
+           "Antonio del Monaco", "UMBERTO DEL BASSO DE", "Federico Conte", 
+           "stefania pezzopane", "guido della frera", "adelizzi cosimo", 
+           "Marina Berlinghieri", "Elisa Tripodi", "Vito De Filippo", 
+           "Graziano Delrio", "Raffaella Paita", "Diego Sozzani", "Raffaele Nevi",
+           "Ugo Cappellacci", "amitrano alessandro", "Giorgio Mulè", 
+           "CLAUDIO COMINARDI","Carlo Sibilia", "Federico D'Incà", 
+           "Renata Polverini", "Mauro Del Barba", "Pier Luigi Bersani", 
+           "Luigi Di Maio", "Simone Baldelli #iovotono", "Matteo Dall'Osso #iohovotatoNO"
+           )
+
+for (match in false_matches){
+  deputati$off_name[deputati$name == match] <- ""
+}
+```
+
+Manually change the pattern for screen names that have no matches 
+see if the names agree:
+
+```{r}
+deputati %>% 
+  select(name, off_name) %>% 
+  filter(off_name == "")
+```
+
+
+```{r}
+pattern = "Dall'osso"
+
+list_deputati$name[str_detect(list_deputati$name, regex(pattern, ignore_case = T ) )]
+deputati$name[str_detect(deputati$name, regex(pattern, ignore_case = T ) )]
+```
+
+If yes update the official name
+
+```{r}
+deputati$off_name[str_detect(deputati$name, regex(pattern, ignore_case = T ) )] <- toString(list_deputati$name[str_detect(list_deputati$name, regex(pattern, ignore_case = T ) )])
+```
+
+## 4. Search for not yet found members of the parliament trough the search users function
+
+```{r}
+all <- right_join(deputati, list_deputati, by = c("off_name" = "name") )
+```
+
+Generate a list of not yet found members of the parliament
+
+```{r}
+not_found <- all$off_name[is.na(all$name)]
+```
+
+Search Twitter for all the names in this list
+and combine them in a not found dataframe
+
+```{r}
+for (name in not_found){
+  nf_df <- rbind(nf_df, search_users(name))
+}
+```
+
+Keep the users that write match the regular expression "deputat." in their description that is, those twitter useres that write about themselves that they are deputato/a
+
+```{r}
+nf <- nf_df[str_detect(nf_df$description, regex("deputat.", ignore_case = T ) ),]
+```
+
+As above match the surnames in the twitter user list with the official list
+
+```{r}
+nf$off_name = ""
+for (dep_name in list_deputati$name){
+      patt = str_split(dep_name, " ")[[1]]
+    if (patt[1] == "de" || patt[1] == "di" || patt[1] == "lo"  || patt[1] == "la"){
+      patt = paste(patt[1], patt[2], sep = " ")
+    } else {
+      patt = toString(patt[1])
+    }
+    nf$off_name[[str_detect(nf$name, regex(patt, ignore_case = T ) )]] <- toString(list_deputati$name[str_detect(list_deputati$name, regex(patt, ignore_case = T ) )][1])
+}
+```
+
+Previse matching manually
+
+```{r}
+nf %>% 
+  select(name, off_name, screen_name)
+```
+
+Perform an inner join with the official list
+
+```{r}
+nf %>% 
+  inner_join(list_deputati, by = c("off_name" ="name")) -> nf
+```
+
+Selct the relevant columns
+
+```{r}
+nf %>% 
+  select(user_id, name, screen_name, description, off_name, url.y, cessato, gruppo, url_gruppo, sub_gruppo, sub_gruppo_url) %>% 
+  rbind(new) -> new
+```
+
+Collate both dataframes
+
+```{r}
+deputati %>% 
+  select(user_id, name, screen_name, description, off_name, url.y, cessato, gruppo, url_gruppo, sub_gruppo, sub_gruppo_url) %>% 
+  rbind(new) -> new
+
+# Remove duplicates for sanity
+unique(new) -> new
+```
+
+Check the list for politicians that dropped out
+
+```{r}
+new %>% 
+  selct(cessato) %>% 
+  filter(cessato != "False")
+```
+
+Manually remove politicians that abandoned their charge before the party split by changing the date in the cell below
+
+```{r}
+new %>% 
+  filter(cessato != "2018-09-25 00:00:00") -> new
+```
+
+Safe the results
+
+```{r}
+saveRDS(new, "userlist.rds")
+```
+
