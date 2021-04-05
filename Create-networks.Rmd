@@ -1,0 +1,109 @@
+---
+title: "Create Networks"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidygraph)
+library(rtweet)
+library(ggraph)
+library(stringr)
+```
+
+Combine all files into one dataframe and save it to timelines.rds
+
+```{r read the data}
+files <- list.files(path = "./timelines/")
+for (file in files){
+ df <- rbind(df, readRDS(paste("./timelines/", file, sep = "")))
+}
+saveRDS(df, file = "timelines.rds")
+```
+
+```{r}
+df <- readRDS("timelines.rds")
+```
+
+# Whole Parliament
+Read the list of users and filter the tweets that have been retweeted by users from within the userlist.
+
+```{r construct the network}
+user_df <- readRDS("userlist.rds")
+ids <- as.data.frame(user_df$user_id)
+names(ids) <- c("user_id")
+
+df %>% 
+  inner_join(ids, by = c("retweet_user_id" = "user_id")) %>% 
+  filter(user_id != retweet_user_id) -> network
+```
+
+Construct the graph with weighted edges (by number of retweets)
+
+```{r create the graph}
+network %>% 
+  inner_join(user_df) %>% 
+  group_by(user_id, screen_name, gruppo) %>% 
+  select(user_id, screen_name, gruppo) %>% 
+  unique() -> vertices
+
+network %>% 
+  select(from = retweet_user_id, to = user_id) %>% 
+  group_by(from, to) %>% 
+  filter(from %in% vertices$user_id & to %in% vertices$user_id) %>% 
+  summarise(weight = n()) -> edges
+
+graph <- tbl_graph(vertices, edges, directed = F, node_key = "user_id")
+```
+
+```{r save the graph}
+saveRDS(network, "retweet_network.rds")
+saveRDS(vertices, "retweet_nw_vert.rds")
+saveRDS(edges, "retweet_nw_edg.rds")
+saveRDS(graph, "retweet_graph.rds")
+```
+
+# Split
+Create the network of party-members of the parties of interest, only considering data befor the split occured.
+
+```{r filter out PD and IV before the split}
+user_df %>% 
+  filter(gruppo == "ITALIA VIVA") -> user_df_split
+
+user_df %>% 
+  filter(gruppo == "PARTITO DEMOCRATICO") %>% 
+  rbind(user_df_split) -> user_df_split
+
+ids <- as.data.frame(user_df_split$user_id)
+names(ids) <- c("user_id")
+
+df %>% 
+  inner_join(ids, by = c("retweet_user_id" = "user_id")) %>% 
+  filter(user_id != retweet_user_id, created_at < "2019-09-18 00:00:00" ) -> network_split
+```
+
+```{r create graph before}
+network_split %>% 
+  inner_join(user_df_split) %>%
+  group_by(user_id, screen_name, gruppo) %>% 
+  select(user_id, screen_name, gruppo) %>% 
+  unique() -> vertices_split
+
+network_split %>% 
+  select(from = retweet_user_id, to = user_id) %>% 
+  group_by(from, to) %>% 
+  filter(from %in% vertices_split$user_id & to %in% vertices_split$user_id) %>% 
+  summarise(weight = n()) -> edges_split
+
+graph_split <- tbl_graph(vertices_split, edges_split, directed = F, node_key = "user_id")
+```
+
+```{r save graph before}
+saveRDS(network_split, "retweet_network_split.rds")
+saveRDS(vertices_split, "retweet_nw_vert_split.rds")
+saveRDS(edges_split, "retweet_nw_edg_split.rds")
+saveRDS(graph_split, "retweet_graph_split.rds")
+```
+
