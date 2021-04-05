@@ -154,7 +154,7 @@ nf %>%
   inner_join(list_deputati, by = c("off_name" ="name")) -> nf
 ```
 
-Selct the relevant columns
+Select the relevant columns
 
 ```{r}
 nf %>% 
