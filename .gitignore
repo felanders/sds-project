@@ -9,3 +9,11 @@ env.r
 curate-users.Rmd
 curate-users.nb.html
 deputati_fetched.rds
+assignment.Rmd
+assignment.nb.html
+list_names_iv.csv
+list_names_pd.csv
+new_users.rds
+timelines_2.rds
+party-split.Rmd
+party-split.nb.html
