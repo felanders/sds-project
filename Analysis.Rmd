@@ -15,10 +15,18 @@ library(grid)
 library(gridExtra)
 ```
 
-# Full Graph 
+# Full Graph
 
 ```{r read the graph}
 graph <- readRDS("retweet_graph.rds")
+```
+
+## A cell to remove the weighting by number of retweets the results stay robust!
+
+```{r remove weights}
+graph %>% 
+  activate(edges) %>% 
+  mutate(weight = 1) -> graph
 ```
 
 ```{r plot the graph}
@@ -30,7 +38,7 @@ graph %>%
                           breaks=c("ITALIA VIVA",
                                    "PARTITO DEMOCRATICO",
                                    "FORZA ITALIA - BERLUSCONI PRESIDENTE",
-                                   "LEGA -SALVINI PREMIER",
+                                   "LEGA - SALVINI PREMIER",
                                    "LIBERI E UGUALI",
                                    "MISTO",
                                    "MOVIMENTO 5 STELLE"),
@@ -55,17 +63,20 @@ graph %>%
                           breaks=c("ITALIA VIVA",
                                    "PARTITO DEMOCRATICO",
                                    "FORZA ITALIA - BERLUSCONI PRESIDENTE",
-                                   "LEGA -SALVINI PREMIER",
+                                   "LEGA - SALVINI PREMIER",
                                    "LIBERI E UGUALI",
                                    "MISTO",
-                                   "MOVIMENTO 5 STELLE"),
+                                   "MOVIMENTO 5 STELLE",
+                                   "FRATELLI D'ITALIA"),
                           labels=c("Italia Viva",
                                    "Partito Democratico",
                                    "Forza Italia",
                                    "Lega",
-                                   "liberi e Uguali",
+                                   "Liberi e Uguali",
                                    "Misto",
-                                   "Movimento 5 Stelle"))
+                                   "Movimento 5 Stelle",
+                                   "Fratelli d'Italia"))
+ggsave("italian_chamber.png")
 ```
 
 ```{r compute assortativity}
@@ -99,11 +110,21 @@ ggplot(permassort, aes(x=permassort)) +
   coord_cartesian(xlim = c(-1,1)) + 
   labs(x = "", y = "Count", title = "Assortativity Score") +
   scale_fill_viridis_d()
+ggsave("chamber_assort_bootstrap.png")
 ```
+
 # Party-Split Graph
 
 ```{r load graph}
 graph_split <- readRDS("retweet_graph_split.rds")
+```
+
+## A cell to remove the weighting by number of retweets the results stay robust!
+
+```{r remove weights split}
+graph_split %>% 
+  activate(edges) %>% 
+  mutate(weight = 1) -> graph_split
 ```
 
 ```{r plot graph}
@@ -115,6 +136,7 @@ graph_split %>%
                       breaks=c("ITALIA VIVA", "PARTITO DEMOCRATICO"),
                       labels=c("Italia Viva", "Partito Democratico"),
                       values=c("#ffcf20ff", "#541352ff"))
+ggsave("split_graph.png")
 ```
 
 ```{r compute assortativity split}
@@ -147,13 +169,41 @@ ggplot(permassort_split, aes(x=permassort_split)) +
   coord_cartesian(xlim = c(-1,1)) + 
   labs(x = "", y = "Count", title = "Assortativity Score") +
   scale_fill_viridis_d()
+ggsave("assort_split_bootstrap.png")
 ```
+
 # Analyzing the split
 
 ```{r predict the split}
 graph_split %>% 
   activate(nodes) %>% 
   mutate(predicted=as.character(group_spinglass(spins=2)), party=gruppo) -> split
+```
+
+```{r compute assortativity predict}
+split %>% 
+  activate(nodes) %>% 
+  mutate(ass = graph_assortativity(attr = predicted)) %>%
+  pull(ass) %>% 
+  head(1) -> assort_predict
+assort_predict
+```
+
+```{r bootstrap assortativity with predicted}
+ggplot(permassort_split, aes(x=permassort_split)) +
+  geom_histogram(binwidth = 0.005) +
+  geom_vline(xintercept = assort_split, colour =  "red") +
+  annotate("text", x=assort_split, y = 500, 
+           label = as.character(round(assort_split, digits = 3)),
+           size=3, angle=90, vjust=-0.4, hjust=0, colour = "red") +
+  geom_vline(xintercept = assort_predict, colour =  "#ffcf20ff") +
+  annotate("text", x=assort_predict, y = 700, 
+           label = as.character(round(assort_predict, digits = 3)),
+           size=3, angle=90, vjust=-0.4, hjust=0, colour = "#ffcf20ff")+
+  coord_cartesian(xlim = c(-1,1)) + 
+  labs(x = "", y = "Count", title = "Assortativity Score") +
+  scale_fill_viridis_d()
+ggsave("assort_split_bootstrap_predict.png")
 ```
 
 
@@ -198,10 +248,14 @@ as_tibble(split) %>%
 grid.arrange(plot_predicted_party, plot_party_predicted, nrow = 2, 
              top=textGrob("Predicted Party Split", 
                           gp = gpar(fontsize = 13, fontface = 'bold'))
-             )
+             ) -> split_distribution
+ggsave(plot = split_distribution, "split_distribution.png")
 ```
+
 ## Beware that the layout of the graph is random
+
 ### Different graphs cannot be compared directly
+
 ```{r plot predicted graph}
 split %>% 
   ggraph("fr")  + 
@@ -215,7 +269,6 @@ split %>%
     plot_predicted
 plot_predicted
 ```
-
 
 ```{r plot actual graph}
 split %>% 
@@ -246,8 +299,8 @@ split %>%
                          labels=c("Italia Viva", "Partito Democratico")) -> 
     plot_intersect
 plot_intersect
+ggsave("split_graph.png")
 ```
-
 
 ```{r compute metrics of IV classificatoin}
 TP <- as.numeric(confusion[1,3])
@@ -311,7 +364,6 @@ for (i in 1:10000){
 }
 ```
 
-
 ```{r plot histograms of bootstrap metrics}
 perm_acc = data.frame(perm_acc)
 
@@ -365,5 +417,6 @@ ggplot(perm_f1, aes(x=perm_f1)) +
 grid.arrange(plot_acc, plot_prec, plot_rec, plot_f1, nrow = 2, ncol = 2, 
              top=textGrob("Random Clustering vs. Spinglass \n N = 10000 ", 
                           gp = gpar(fontsize = 13, fontface = 'bold'))
-             )
+             ) -> split_metrics
+ggsave(plot = split_metrics, "split_metrics.png")
 ```
