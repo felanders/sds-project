@@ -1,0 +1,313 @@
+---
+title: "US_network_analysis_script_US.Rmd"
+output: html_document
+---
+
+The purpose of this file is the retrieval of twitter data of US Congress members. For this, a Twitter user list maintained by C-Span is used as the source for twitter names and handles of Politicians. However, this list does not contain any information about party affiliation. Due to this, a list of members of Congress and their party affiliation is sourced from the NGO Triagecancer, to match twitter users and party affiliation. Finally, timelines for said politicians are extracted, by accessing the twitter API.
+
+```{r message=FALSE, warning=FALSE}
+library(rtweet)
+library(dplyr)
+library(stringr)
+library(tidygraph)
+library(ggraph)
+
+
+# Define directory
+setwd("C:/Users/ciril/OneDrive - Danmarks Tekniske Universitet/ETH Zürich/Social Data Science/Assignment/")
+```
+
+## Twitter User Lists
+
+Retrieve User Lists from C-Spans Twitter List of Congress Members: <https://twitter.com/i/lists/34179516>
+
+Since this is a long process, the retrieval code has been commented out.
+
+```{r}
+#users <- lists_members(list_id = 34179516)     
+#save(users, file = 'Data/users.Rdata')
+
+load('Data/users.Rdata')
+```
+
+Extract required information for matching
+
+```{r}
+# Obtain handles and titter names 
+twitter_handles <- users$screen_name
+twitter_names <- users$name
+```
+
+## List of US Congress Members and Party Affiliation
+
+Retrieve a list of congress members, their respective party affiliation and their twitter handle, which is sourced from the NGO Triagecancer: <https://triagecancer.org/congressional-social-media>.
+
+```{r}
+party_data <- read.csv(file = 'Data/Congress_data.csv', header = T)
+```
+
+### Check Matching based on Twitter Handle
+
+Before being able to match both the twitter data and party affiliation, certain cleaning of the data needs to be performed. The party_data dataframe contains handles which includes the symbol '\@', whereas twitter handles provided by twitter do not include this symbol.
+
+```{r}
+# Remove the @ from the handle 
+party_data$Twitter <- sub('.', '', party_data$Twitter)     # '.' Indicates one character
+party_data$Party <- as.character(party_data$Party)
+```
+
+```{r}
+# Check which are not covered in the twitter list
+existing <- party_data[(party_data$Twitter %in% twitter_handles),]
+missing <- party_data[!(party_data$Twitter %in% twitter_handles),]
+```
+
+As can be seen, not all handles of politicians are represented in the the users dataframe. This is because C-Span's list contains most updated twitter handles of politicians. Some handles have been updated after the publication of Triagecancer's party affiliation list and thus, cannot be matched in this way. ' \#\#\# Enable Matching based on Screen Name / Politician Name
+
+To overcome the issue of outdated twitter handles, matching based on the screen names will be performed. The names and surnames of politicians in party_data are written in the format 'Surname, Name', which prevents matching based on names.
+
+```{r}
+# Remove the ',' in between Surname and Name
+party_data$Name <- str_remove(party_data$Name, ',')
+
+# Extract the Surname
+surnames <- gsub( " .*$", "", party_data$Name)   # Visit this for help: https://stackoverflow.com/questions/15895050/using-gsub-to-extract-character-string-before-white-space-in-r
+
+# Remove the Surnames
+party_data$Name <- sub(".*? ", "", party_data$Name)    # Visit this for help: https://stackoverflow.com/questions/32767164/use-gsub-remove-all-string-before-first-white-space-in-r
+
+# Concatenate Name and Surnames
+party_data$Name <- paste(party_data$Name, surnames, sep = " ")
+```
+
+Additionally, certain screen names contain prefixes, such as 'Sen', 'US Rep' or suffixes such as ', MD'. To enable matching, the most prominent prefixes and suffixes are removed in the following.
+
+```{r}
+# Clean up users dataframe by removing words like Senator, Rep., Reverend, Congressman and Congresswoman
+users$name <- gsub('Senator ', '', users$name)
+users$name <- gsub('Reverend ', '', users$name)
+users$name <- gsub('Congresswoman ', '', users$name)
+users$name <- gsub('Rep. ', '', users$name)
+users$name <- gsub('Congressman ', '', users$name)
+users$name <- gsub(', M.D. ', '', users$name)
+users$name <- gsub('Sen. ', '', users$name)
+users$name <- gsub('US Rep ', '', users$name)
+users$name <- gsub('U.S. ', '', users$name)
+users$name <- gsub('US ', '', users$name)
+users$name <- gsub('Dr. ', '', users$name)
+```
+
+## Match Party Affiliation
+
+In this step, matching is performed based on either the twitter handles or the screen names.
+
+```{r}
+############################## Match Party Affiliation
+users$party_affiliation <- NA
+
+name <- 0
+handle <- 0
+for (i in c(1:nrow(users))) {
+  if (users$name[i] %in% party_data$Name == TRUE) {
+    users$party_affiliation[i] <- party_data$Party[party_data$Name == users$name[i]]
+    name <- name + 1
+  } else if (users$screen_name[i] %in% party_data$Twitter) {
+    users$party_affiliation[i] <- party_data$Party[party_data$Twitter == users$screen_name[i]]
+    handle <- handle + 1
+  }
+}
+# Number of Matches
+matched = name + handle   
+
+# Develop the correct data frames
+users %>% filter(!is.na(users$party_affiliation)) -> matched_users
+# For some reason, Bernie was mislabeled                      
+matched_users$party_affiliation[matched_users$name == "Bernie Sanders"] <- "D"      
+```
+
+## Obtain Timelines of Matched Individuals
+
+First, we will obtain the timelines of all users, while including retweets. Blocks of code are commented out, since the retrieval process has already been run before.
+
+```{r}
+# timelines <- get_timelines(user=users$user_id, n=3200, include_rts = T)
+#save(timelines, file = "C:/Users/ciril/OneDrive - Danmarks Tekniske Universitet/ETH Zürich/Social Data Science/Assignment/Data/timelines.Rdata")
+
+# Load the Tweet data
+load("Data/timelines.Rdata")
+timelines %>% filter(user_id %in% matched_users$user_id) -> matched_timelines
+```
+
+#### Network Creation
+
+Only select retweets, that are concerning congress members
+
+```{r}
+matched_timelines %>% filter(retweet_user_id %in% matched_users$user_id) -> edges
+```
+
+Remove retweets, that are self-retweets
+
+```{r}
+edges %>% filter(retweet_user_id != user_id) -> edges
+```
+
+To properly graph the network, we need vertices as nodes, as well as edges that are weighted based on the number of interactions
+
+```{r}
+matched_users %>% select(id=user_id, name=screen_name, party_affiliation) -> vertices
+edges %>% select(from=retweet_user_id, to=user_id) %>% group_by(from, to) %>% summarize(weight=n()) -> edges 
+```
+
+Save the data in a graph object
+
+```{r}
+graph <- tbl_graph(nodes=vertices, edges = edges, node_key = "id", directed = F)
+```
+
+## Network Representation
+
+```{r}
+graph %>% ggraph(layout="fr") +  
+            geom_edge_link()  + 
+            geom_node_point(aes(color=party_affiliation), size=3) +
+            scale_colour_discrete(name="Party",
+                                  breaks=c("D",
+                                           "R",
+                                           "I"),
+                                  labels=c("Democrats",
+                                           "Republicans",
+                                           "Independent"))
+```
+
+As can be seen, the current visualisation includes strong outliers, as nodes with low weights are shown the same, compared to nodes with higher weighs. A metric than can be used to filter out nodes with less relevance is centrality.
+
+```{r}
+graph %>% activate(nodes) %>% mutate(deg=centrality_degree(mode = "all"))  %>% filter(deg>0) -> graphcc
+```
+
+Calculate the assortativity value to assess, whether we can expect seperations in the network.
+
+```{r}
+graphcc %>% 
+  mutate(assort=graph_assortativity(party_affiliation)) %>% 
+  pull(assort)  %>% 
+  head(1)
+```
+
+As can be seen, the assortativity appears to be very high, with a value 0f 0.796. Due to this, we expect a network that clearly differentiates between both parties.
+
+Visualisation of network with filtered centrality value.
+
+```{r}
+graphcc %>% 
+  ggraph("fr") +
+    geom_edge_link() + 
+    geom_node_point(aes(color=party_affiliation), size=3) +
+    scale_colour_discrete(name="Party",
+                          breaks=c("D",
+                                   "R",
+                                   "I"),
+                          labels=c("Democrats",
+                                   "Republicans",
+                                   "Independent"))
+ggsave("US_network.png", dpi = 300, plot = last_plot())
+```
+
+Depending on the layout algorithm, the layout of the network is varied. Here, we are using the Fruchterman-Reingold layout algorithm.
+
+## Permutation Testing to determine significance
+
+To determine the significance of the party the network structure, one can sample the party affiliation. Sampling the party affiliation should result in assortativity values that are normally distributed around 0, since we expect no dependency when sampling this feature.
+
+```{r}
+# Test a single assortativity value 
+graphcc %>% 
+  mutate(assort=graph_assortativity(sample(party_affiliation))) %>% 
+  pull(assort)  %>% 
+  head(1)
+```
+
+A point estimate of the assortativity value does not say a lot about the significance of the assortativity calculated based on the retweet network. To better analyse significance, we will create N = 1000 runs of sampling party affiliation, and determine the distribution of the resulting assortativity values.
+
+```{r}
+# Run N permutations of sampling the party affiliation
+
+N <- 10000               # Number of sampling runs 
+permassort <- NULL
+for (i in seq(1,N))
+{
+  graphcc %>% 
+    mutate(assort=graph_assortativity(sample(party_affiliation))) %>% 
+    pull(assort)  %>% 
+    head(1) -> res
+  permassort <- c(permassort, res)
+}
+```
+
+```{r}
+# Rerun the assortativity calculation with actual party affiliactions
+graphcc %>% 
+  mutate(assort=graph_assortativity(party_affiliation)) %>% 
+  pull(assort)  %>% 
+  head(1) -> res
+hist(permassort, xlim=range(c(-1, 1)), main = "Histogram of Permutated Assortativity Values", xlab = "Assortativity")
+abline(v=res, col="red")
+
+```
+
+```{r}
+png(filename = "Assort_Hist_US.png", width = 3000, height = 1800, res = 300)
+ggplot(data = data.frame(permassort), aes(x = permassort)) + 
+    geom_histogram(bins = 120, color="white", fill="black") + 
+    labs(x = "Assortativity", y = "Frequency", title = "Histogram of Permutated Assortativity Values for US Congress") +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    coord_cartesian(xlim = c(-1,1)) + 
+    geom_vline(xintercept = res, colour = "red") +
+    annotate("text", x=res, y = 1000, label = as.character(round(res, digits = 3)),
+           size=3, angle=90, vjust=-0.4, hjust=0, colour = "red") +
+    scale_fill_viridis_d()
+dev.off()
+```
+
+
+
+As can be seen from the histogram, the permutation of party affiliation results in normal distribution of outcomes centered around 0. The following statistical values can be calculated for the permutated assortativity values. The mean is close to 0.
+
+```{r}
+summary(permassort)
+```
+
+And the standard deviation
+
+```{r}
+sd(permassort)
+```
+
+When overlaying a normal distribution over the histogram, one can clearly see the normally distributed values.
+
+```{r}
+h <- hist(permassort, col = "lightgray", 
+          main = "Distribution of Permutated Assortativity Values", xlab = "Assortativity") 
+xfit <- seq(min(permassort), max(permassort), length = 40) 
+yfit <- dnorm(xfit, mean = mean(permassort), sd = sd(permassort)) 
+yfit <- yfit * diff(h$mids[1:2]) * length(permassort) 
+
+lines(xfit, yfit, col = "black", lwd = 2)
+```
+
+To confirm the normal distributions of assortativity outcomes, one can use QQ-Plots.
+
+```{r}
+qqnorm(permassort, main = "Normal Q-Q Plot of Assortativity")
+qqline(permassort)
+```
+
+Based on the above results, one can conclude that party affiliation based on retweet behaviour is assortative. To confirm this, we can calculate the p-values. The null hypothesis in this case is, that the assortativity of the network without sampling the party affiliation is close to 0 (for two-sided test H_0 = 0). In case the p-value is low, this null hypothesis is rejected and the alternative accepted. The alternative is that the assortativity is significantly different from 0, as shown above. With N = 10000 and the equation below.
+
+```{r}
+p_value <- (1 + sum(permassort>res))/N
+print(p_value)
+```
+
+The p-value calculated here is lower than 0.05, which is often times postulated as the threshold for significance. It therefore can be concluded, that the assortativity level of the US congress members' network is significant. It can further be concluded, that retweet networks are a viable approach to determine the party affiliation of politicians, given the are active enough on Twitter.
